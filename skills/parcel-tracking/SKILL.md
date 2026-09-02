@@ -23,6 +23,14 @@ Track package deliveries via the Parcel app API and web interface.
 | `parcel_remove` | Delete a delivery (via browser) | No |
 | `parcel_carriers` | List supported carrier codes | No |
 | `parcel_status_codes` | Status code reference | No |
+| `parcel_monitor_poll` | Run one durable, rate-limited monitoring poll | Yes |
+| `parcel_monitor_status` | Read monitor health and pending outbox | Yes |
+| `parcel_monitor_attempt` | Record a notification delivery attempt | Yes |
+| `parcel_monitor_ack` | Acknowledge only after delivery succeeds | Yes |
+| `parcel_camera_process` | Resume one durable camera event | Vision/UniFi config |
+
+For pending monitor notifications, record the attempt, deliver with the configured
+message tool, and acknowledge only after the transport reports success.
 
 ## Browser Tools (edit/remove)
 
@@ -34,8 +42,8 @@ Track package deliveries via the Parcel app API and web interface.
 
 ## Rate Limits
 
-- **parcel_list**: ~20 requests/hour
-- **parcel_add**: ~20 requests/day
+- **parcel_list**: 20 requests/hour
+- **parcel_add**: 20 requests/day, including unsuccessful requests
 - **parcel_edit/remove**: Browser-based, no API rate limit
 
 ## Common Carrier Codes
@@ -55,12 +63,14 @@ Track package deliveries via the Parcel app API and web interface.
 | Code | Meaning |
 |------|---------|
 | 0 | Delivered |
-| 1 | Attempted delivery |
+| 1 | Frozen |
 | 2 | In transit |
-| 3 | Out for delivery |
-| 4 | Info received / Label created |
-| 5 | Exception / Problem |
-| 6 | Expired / Unknown |
+| 3 | Pickup by recipient |
+| 4 | Out for delivery |
+| 5 | Not found |
+| 6 | Failed delivery attempt |
+| 7 | Exception |
+| 8 | Information received |
 
 ## Configuration
 

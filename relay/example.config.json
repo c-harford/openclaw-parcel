@@ -1,0 +1,35 @@
+{
+  "secretsFile": "/usr/local/etc/openclaw-parcel/secrets.json",
+  "listen": {
+    "host": "127.0.0.1",
+    "port": 9091,
+    "maxBodyBytes": 262144,
+    "sharedSecret": { "source": "file", "provider": "secrets", "id": "/unifi/relayToken" },
+    "allowSources": ["127.0.0.1"]
+  },
+  "spoolDirectory": "/var/lib/openclaw-parcel-relay/spool",
+  "workerIntervalMs": 5000,
+  "maxSpoolItems": 10000,
+  "routes": [
+    {
+      "name": "parcel-camera",
+      "match": { "eventType": ["package"] },
+      "target": {
+        "url": "http://127.0.0.1:9092/events",
+        "headers": {
+          "x-relay-token": { "source": "file", "provider": "secrets", "id": "/unifi/relayToken" }
+        }
+      }
+    },
+    {
+      "name": "safety-presence",
+      "match": { "notEventType": ["package"] },
+      "target": {
+        "url": "http://127.0.0.1:9090/events",
+        "headers": {
+          "x-relay-token": { "source": "file", "provider": "secrets", "id": "/unifi/relayToken" }
+        }
+      }
+    }
+  ]
+}

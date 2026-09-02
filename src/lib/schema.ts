@@ -38,3 +38,21 @@ export const removeSchema = Type.Object({
 export const carriersSchema = Type.Object({});
 
 export const statusCodesSchema = Type.Object({});
+
+export const monitorPollSchema = Type.Object({});
+
+export const monitorStatusSchema = Type.Object({});
+
+export const monitorAttemptSchema = Type.Object({
+  notification_id: Type.String({
+    description: "Pending notification ID whose delivery is about to be attempted",
+  }),
+});
+
+export const monitorAckSchema = Type.Object({
+  notification_id: Type.String({
+    description: "Notification ID to acknowledge only after successful transport delivery",
+  }),
+});
+
+export const cameraProcessSchema = Type.Object({});
