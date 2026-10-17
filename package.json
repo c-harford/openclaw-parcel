@@ -19,6 +19,7 @@
     "dist/",
     "marketplace.json",
     "openclaw.plugin.json",
+    "docs/",
     "relay/",
     "skills/",
     "src/"

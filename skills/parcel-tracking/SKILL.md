@@ -23,6 +23,14 @@ Track package deliveries via the Parcel app API and web interface.
 | `parcel_remove` | Delete a delivery (via browser) | No |
 | `parcel_carriers` | List supported carrier codes | No |
 | `parcel_status_codes` | Status code reference | No |
+| `parcel_monitor_poll` | Run one durable, rate-limited monitoring poll | Yes |
+| `parcel_monitor_status` | Read monitor health and pending outbox | Yes |
+| `parcel_monitor_attempt` | Record a notification delivery attempt | Yes |
+| `parcel_monitor_ack` | Acknowledge only after delivery succeeds | Yes |
+| `parcel_camera_process` | Resume one durable camera event | Vision/UniFi config |
+
+For pending monitor notifications, record the attempt, deliver with the configured
+message tool, and acknowledge only after the transport reports success.
 
 ## Browser Tools (edit/remove)
 

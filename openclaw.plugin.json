@@ -36,10 +36,102 @@
               "source",
               "provider",
               "id"
-            ]
+            ],
+            "additionalProperties": false
           }
         ],
         "description": "Parcel API key: plain string, ${ENV_VAR}, or SecretRef object"
+      },
+      "monitor": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "heartbeatPrompt": { "type": "boolean", "default": true },
+          "minIntervalMinutes": { "type": "number", "minimum": 3, "default": 10 },
+          "maxRequestsPerHour": { "type": "integer", "minimum": 1, "maximum": 20, "default": 18 },
+          "missingPollThreshold": { "type": "integer", "minimum": 1, "default": 2 }
+        },
+        "additionalProperties": false
+      },
+      "unifi": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean", "default": false },
+          "ingressToken": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "properties": {
+                  "source": { "type": "string", "enum": ["env", "file"] },
+                  "provider": { "type": "string" },
+                  "id": { "type": "string" }
+                },
+                "required": ["source", "provider", "id"],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "cameras": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "externalId": { "type": "string" },
+                "protectCameraId": { "type": "string" },
+                "roles": { "type": "array", "items": { "type": "string" } },
+                "snapshotChannel": { "type": "string" }
+              },
+              "required": ["externalId", "protectCameraId", "roles"],
+              "additionalProperties": false
+            }
+          },
+          "protect": {
+            "type": "object",
+            "properties": {
+              "baseUrl": { "type": "string" },
+              "apiKey": {
+                "oneOf": [
+                  { "type": "string" },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "source": { "type": "string", "enum": ["env", "file"] },
+                      "provider": { "type": "string" },
+                      "id": { "type": "string" }
+                    },
+                    "required": ["source", "provider", "id"],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "required": ["baseUrl", "apiKey"],
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "vision": {
+        "type": "object",
+        "properties": {
+          "models": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider": { "type": "string" },
+                "model": { "type": "string" },
+                "profile": { "type": "string" }
+              },
+              "required": ["provider", "model"],
+              "additionalProperties": false
+            }
+          },
+          "timeoutMs": { "type": "integer", "minimum": 1000, "default": 20000 }
+        },
+        "additionalProperties": false
       }
     },
     "additionalProperties": false
@@ -58,7 +150,12 @@
       "parcel_edit",
       "parcel_remove",
       "parcel_carriers",
-      "parcel_status_codes"
+      "parcel_status_codes",
+      "parcel_monitor_poll",
+      "parcel_monitor_status",
+      "parcel_monitor_attempt",
+      "parcel_monitor_ack",
+      "parcel_camera_process"
     ]
   }
 }

@@ -107,16 +107,27 @@ parcel_status_codes {}
 - **parcel_list / parcel_add**: Direct REST API calls to `https://api.parcel.app/external`
 - **parcel_edit / parcel_remove**: Returns browser instructions with `requires_browser: true` for OpenClaw's browser tool
 - **parcel_carriers / parcel_status_codes**: Static reference data, no network calls
+- **parcel_monitor_***: Atomic observations, deterministic changes, persistent
+  rate state, and a durable notification outbox
+- **parcel_camera_process**: Provider-neutral snapshot, vision, and parcel
+  correlation pipeline for persisted UniFi events
+
+Monitoring uses OpenClaw's existing heartbeat. It does not install another
+scheduler. The first successful poll creates a silent baseline. Notification
+delivery and acknowledgement are separate operations, so transport failures
+remain pending across restarts.
+
+See [Production monitoring](docs/monitoring.md) and [Durable UniFi relay](relay/README.md).
 
 ## Rate Limits
 
-- parcel_list: 20 requests/hour
+- parcel_list: 20 requests/hour (the monitoring API uses `filter_mode=active`)
 - parcel_add: 20 requests/day, including unsuccessful requests
 - parcel_edit / parcel_remove: Browser-based, no API limit
 
 The HTTP client does not automatically retry failed calls because failed
-requests may consume these limits. HTTP rate-limit errors expose Parcel's
-`Retry-After` value to callers.
+requests may consume these limits. HTTP rate-limit errors retain Parcel's
+`Retry-After` value for monitor scheduling.
 
 ## License
 

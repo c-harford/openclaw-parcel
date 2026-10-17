@@ -17,6 +17,11 @@ import {
   removeSchema,
   carriersSchema,
   statusCodesSchema,
+  monitorPollSchema,
+  monitorStatusSchema,
+  monitorAttemptSchema,
+  monitorAckSchema,
+  cameraProcessSchema,
 } from "./lib/schema.js";
 import {
   handleList,
@@ -29,6 +34,14 @@ import {
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_MONITOR_CONFIG, ParcelMonitor } from "./monitor/poll.js";
+import { FileMonitorStateStore } from "./monitor/state-store.js";
+import { createUnifiIngressHandler } from "./unifi/ingress.js";
+import type { ParcelCameraConfig } from "./unifi/types.js";
+import { UnifiProtectSnapshotClient } from "./unifi/snapshot-client.js";
+import { ParcelCameraProcessor } from "./unifi/processor.js";
+import { OpenClawVisionProvider } from "./vision/openclaw-provider.js";
+import type { VisionModelConfig } from "./vision/types.js";
 
 type ListParams = Static<typeof listSchema>;
 type AddParams = Static<typeof addSchema>;
@@ -43,6 +56,26 @@ interface SecretRef {
 
 interface PluginConfig {
   apiKey?: string | SecretRef;
+  monitor?: {
+    enabled?: boolean;
+    heartbeatPrompt?: boolean;
+    minIntervalMinutes?: number;
+    maxRequestsPerHour?: number;
+    missingPollThreshold?: number;
+  };
+  unifi?: {
+    enabled?: boolean;
+    ingressToken?: string | SecretRef;
+    cameras?: ParcelCameraConfig[];
+    protect?: {
+      baseUrl?: string;
+      apiKey?: string | SecretRef;
+    };
+  };
+  vision?: {
+    models?: VisionModelConfig[];
+    timeoutMs?: number;
+  };
 }
 
 function isSecretRef(value: unknown): value is SecretRef {
@@ -142,6 +175,11 @@ const pluginEntry: OpenClawPluginDefinition = definePluginEntry({
     // resolving the key once per registration avoids re-reading secrets.json
     // on every tool invocation.
     let cachedClient: ParcelAPIClient | null = null;
+    let cachedMonitor: ParcelMonitor | null = null;
+    let cachedCameraProcessor: ParcelCameraProcessor | null = null;
+    const stateStore = new FileMonitorStateStore(
+      join(api.runtime.state.resolveStateDir(), "plugins", "openclaw-parcel")
+    );
 
     async function getApiClient(): Promise<ParcelAPIClient | null> {
       if (cachedClient) return cachedClient;
@@ -149,6 +187,45 @@ const pluginEntry: OpenClawPluginDefinition = definePluginEntry({
       if (!apiKey) return null;
       cachedClient = new ParcelAPIClient(apiKey);
       return cachedClient;
+    }
+
+    async function getMonitor(): Promise<ParcelMonitor> {
+      if (cachedMonitor) return cachedMonitor;
+      const client = await getApiClient();
+      const monitorConfig = config?.monitor;
+      cachedMonitor = new ParcelMonitor(
+        client,
+        stateStore,
+        {
+          minIntervalMinutes:
+            monitorConfig?.minIntervalMinutes ?? DEFAULT_MONITOR_CONFIG.minIntervalMinutes,
+          maxRequestsPerHour:
+            monitorConfig?.maxRequestsPerHour ?? DEFAULT_MONITOR_CONFIG.maxRequestsPerHour,
+          missingPollThreshold:
+            monitorConfig?.missingPollThreshold ?? DEFAULT_MONITOR_CONFIG.missingPollThreshold,
+        }
+      );
+      return cachedMonitor;
+    }
+
+    async function getCameraProcessor(): Promise<ParcelCameraProcessor | null> {
+      if (cachedCameraProcessor) return cachedCameraProcessor;
+      const protect = config?.unifi?.protect;
+      const models = config?.vision?.models ?? [];
+      if (!protect?.baseUrl || !protect.apiKey || models.length === 0) return null;
+      const protectApiKey = isSecretRef(protect.apiKey)
+        ? await resolveSecretRef(protect.apiKey)
+        : protect.apiKey;
+      if (!protectApiKey) return null;
+      const snapshots = new UnifiProtectSnapshotClient(protect.baseUrl, protectApiKey);
+      const vision = new OpenClawVisionProvider(
+        (params) => api.runtime.mediaUnderstanding.extractStructuredWithModel(params as never),
+        api.config,
+        models,
+        config?.vision?.timeoutMs
+      );
+      cachedCameraProcessor = new ParcelCameraProcessor(stateStore, snapshots, vision);
+      return cachedCameraProcessor;
     }
 
     // --- parcel_list ---
@@ -242,6 +319,128 @@ const pluginEntry: OpenClawPluginDefinition = definePluginEntry({
         return toToolResult(handleStatusCodes());
       },
     });
+
+    api.registerTool({
+      name: "parcel_monitor_poll",
+      label: "Parcel Monitor Poll",
+      description:
+        "Run one rate-limited Parcel monitor poll and return durable pending notifications. Does not deliver or acknowledge them.",
+      parameters: monitorPollSchema,
+      async execute() {
+        if (config?.monitor?.enabled === false) return errorResult("Parcel monitoring is disabled.");
+        const monitor = await getMonitor();
+        try {
+          return toToolResult(await monitor.poll());
+        } catch (e: unknown) {
+          return errorResult(e instanceof Error ? e.message : String(e));
+        }
+      },
+    });
+
+    api.registerTool({
+      name: "parcel_monitor_status",
+      label: "Parcel Monitor Status",
+      description: "Return monitor health and durable pending notifications without calling Parcel.",
+      parameters: monitorStatusSchema,
+      async execute() {
+        const monitor = await getMonitor();
+        try {
+          const status = await monitor.status();
+          return toToolResult({
+            success: true,
+            revision: status.state.revision,
+            baselineEstablished: status.state.baselineEstablished,
+            health: status.health,
+            pollControl: status.state.pollControl,
+            pendingNotifications: status.pendingNotifications,
+          });
+        } catch (e: unknown) {
+          return errorResult(e instanceof Error ? e.message : String(e));
+        }
+      },
+    });
+
+    api.registerTool({
+      name: "parcel_monitor_attempt",
+      label: "Parcel Monitor Attempt",
+      description: "Record that transport delivery of a pending notification is about to be attempted.",
+      parameters: monitorAttemptSchema,
+      async execute(_toolCallId: string, params: Record<string, unknown>) {
+        const monitor = await getMonitor();
+        try {
+          return toToolResult({
+            success: true,
+            notification: await monitor.recordAttempt(String(params.notification_id)),
+          });
+        } catch (e: unknown) {
+          return errorResult(e instanceof Error ? e.message : String(e));
+        }
+      },
+    });
+
+    api.registerTool({
+      name: "parcel_monitor_ack",
+      label: "Parcel Monitor Acknowledge",
+      description: "Acknowledge a notification only after its transport reports successful delivery.",
+      parameters: monitorAckSchema,
+      async execute(_toolCallId: string, params: Record<string, unknown>) {
+        const monitor = await getMonitor();
+        try {
+          return toToolResult({
+            success: true,
+            notification: await monitor.acknowledge(String(params.notification_id)),
+          });
+        } catch (e: unknown) {
+          return errorResult(e instanceof Error ? e.message : String(e));
+        }
+      },
+    });
+
+    api.registerTool({
+      name: "parcel_camera_process",
+      label: "Parcel Camera Process",
+      description:
+        "Resume one durable parcel-camera event through snapshot, vision, correlation, and notification outbox processing.",
+      parameters: cameraProcessSchema,
+      async execute() {
+        const processor = await getCameraProcessor();
+        if (!processor) {
+          return errorResult("Parcel camera processing requires UniFi Protect and vision model configuration.");
+        }
+        try {
+          return toToolResult(await processor.processNext());
+        } catch (e: unknown) {
+          return errorResult(e instanceof Error ? e.message : String(e));
+        }
+      },
+    });
+
+    if (config?.monitor?.enabled !== false && config?.monitor?.heartbeatPrompt !== false) {
+      api.on("heartbeat_prompt_contribution", () => ({
+        appendContext:
+          "Parcel monitoring: call parcel_monitor_poll once, then parcel_camera_process until it reports idle. For each pending notification, call parcel_monitor_attempt, deliver its payload using the configured message tool, and call parcel_monitor_ack only after the transport reports success. Leave failed deliveries pending. Finish with parcel_monitor_status; if health is degraded, surface an operator-visible warning and do not return a silent/OK heartbeat response.",
+      }));
+    }
+
+    if (config?.unifi?.enabled && config.unifi.cameras?.length) {
+      api.registerHttpRoute({
+        path: "/plugins/openclaw-parcel/unifi/events",
+        auth: "plugin",
+        match: "exact",
+        handler: createUnifiIngressHandler(
+          stateStore,
+          config.unifi.cameras,
+          async () => {
+            const token = config.unifi?.ingressToken;
+            return isSecretRef(token) ? resolveSecretRef(token) : token;
+          },
+          async () => {
+            const processor = await getCameraProcessor();
+            return processor?.processNext();
+          }
+        ),
+      });
+    }
   },
 });
 
